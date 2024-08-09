@@ -1,51 +1,67 @@
-from flask import Flask, jsonify, request, Response
-from bs4 import BeautifulSoup
-import requests
-import json
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import os
+import sys
+from werkzeug.utils import secure_filename
+from routes.ex import process_excel
 
-from routes.data import get_data
-from routes.weather import get_weather
+# 경로 추가
+sys.path.append(os.path.join(os.path.dirname(__file__), 'routes'))
 
 app = Flask(__name__)
+CORS(app)
 
-@app.route('/')
-def hello():
-    return 'Hello, Flask!!!'
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'xls', 'xlsx'}
 
-@app.route('/name')
-def by():
-    return 'Hello, bbb!!!'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# 기본적인 GET 요청을 처리하는 라우트
-app.add_url_rule('/api/data', 'get_data', get_data, methods=['GET'])
-app.add_url_rule('/api/weather','get_weather', get_weather, methods=['GET'])
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    # 업로드된 파일이 있는지 확인
+    uploaded_files = os.listdir(app.config['UPLOAD_FOLDER'])
+    if not uploaded_files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], uploaded_files[0])
+
+    try:
+        category_totals = process_excel(file_path)
+        return jsonify({'category_totals': category_totals})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+
+    file = request.files['file']
+
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+
+    try:
+        category_totals = process_excel(file_path)
+        return jsonify({'category_totals': category_totals})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
     app.run(debug=True)
-
-
-    # GET 요청 시 쿼리파라미터 사용하기
-@app.route('/api/query', methods=['GET'])
-def get_query():
-    output = ""
-    item_type = request.args.get('type', default=None, type=None)
-    item_color = request.args.get('color', default=None, type=None)
-    output += f"<h1>{item_type}</h1>"
-    output += f"<h1>{item_color}</h1>"
-    return output
-
-# 경로 변수 사용하기
-@app.route('/api/item/<item_id>', methods=['GET'])
-def get_path_item(item_id):
-    output = ""
-    output += f"<h1>{item_id}</h1>"
-    return output
-
-# POST 방식 사용
-@app.route('/api/register', methods=['POST'])
-def post_register():
-    data = request.get_json()
-    username = data.get('username', None)
-    password = data.get('password', None)
-    return jsonify({"username": username, "password": password})
-
